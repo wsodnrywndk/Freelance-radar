@@ -233,7 +233,7 @@ def check_commands():
 
     OFFSET_FILE.write_text(str(offset))
 
-
+MAX_ALERTS_PER_RUN = 3
 def main():
     print("🚀 Freelance Radar запущен")
 
@@ -245,7 +245,8 @@ def main():
 
     seen = load_seen()
     new_seen = set(seen)
-
+sent_count = 0
+pending_posts = []
     for channel in CHANNELS:
         print(f"Проверка @{channel}")
 
@@ -255,33 +256,36 @@ def main():
             print(f"Найдено публикаций: {len(posts)}")
 
             for post in posts:
-                post_id = post["id"]
+    post_id = post["id"]
 
-                if post_id in seen:
-                    continue
+    if post_id in seen:
+        continue
 
-                new_seen.add(post_id)
-
-                if not matches(post["text"]):
-                    continue
-
-                notification = (
-                    "🚀 НОВЫЙ ЗАКАЗ\n"
-                    "━━━━━━━━━━━━━━\n\n"
-                    f"📢 Канал: @{channel}\n\n"
-                    "📝 Описание:\n"
-                    f"{post['text']}\n\n"
-                    "━━━━━━━━━━━━━━\n"
-                    f"🔗 Открыть оригинал:\n{post['link']}"
-                )
-
-                send(CHAT_ID, notification)
-
-                print(f"Отправлен заказ из @{channel}")
+    if matches(post["text"]):
+        pending_posts.append((channel, post))
+    else:
+        new_seen.add(post_id)
 
         except Exception as error:
             print(f"Ошибка @{channel}: {error}")
+for channel, post in pending_posts[:MAX_ALERTS_PER_RUN]:
+    notification = (
+        "🚀 НОВЫЙ ЗАКАЗ\n"
+        "━━━━━━━━━━━━━━\n\n"
+        f"📢 Канал: @{channel}\n\n"
+        "📝 Описание:\n"
+        f"{post['text']}\n\n"
+        "━━━━━━━━━━━━━━\n"
+        f"🔗 Открыть оригинал:\n{post['link']}"
+    )
 
+    send(CHAT_ID, notification)
+    new_seen.add(post["id"])
+    sent_count += 1
+
+    print(f"Отправлен заказ из @{channel}")
+
+print(f"Отправлено заказов: {sent_count}")
     save_seen(new_seen)
 
     print("✅ Проверка завершена")
