@@ -3,7 +3,7 @@ name: Freelance Radar
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - - cron: "17,32,47,2 * * * *"
 
 permissions:
   contents: write
