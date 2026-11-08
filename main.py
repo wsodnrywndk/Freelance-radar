@@ -21,31 +21,11 @@ CHANNELS = [
     "frilans"
 ]
 
-KEYWORDS = [
-    "ищу исполнителя",
-    "нужен исполнитель",
-    "ищу специалиста",
-    "требуется специалист",
-    "ищу дизайнера",
-    "нужен дизайнер",
-    "ищу копирайтера",
-    "ищу разработчика",
-    "ищу монтажера",
-    "ищу монтажёра",
-    "ищу человека",
-    "ищем специалиста",
-    "нужен человек",
-    "ищу фрилансера",
-    "заказ на",
-    "оплата за",
-    "подработка",
-    "фриланс"
-]
+MAX_ALERTS_PER_RUN = 3
 
 
 def telegram(method, params=None):
     data = urllib.parse.urlencode(params or {}).encode()
-
     request = urllib.request.Request(API + method, data=data)
 
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -71,7 +51,6 @@ def load_seen():
             return set(json.loads(SEEN_FILE.read_text()))
         except Exception:
             return set()
-
     return set()
 
 
@@ -83,7 +62,6 @@ def save_seen(seen):
 
 def get_channel_posts(channel):
     url = f"https://t.me/s/{channel}"
-
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0"}
@@ -93,7 +71,6 @@ def get_channel_posts(channel):
         page = response.read().decode("utf-8", errors="ignore")
 
     soup = BeautifulSoup(page, "html.parser")
-
     posts = []
     found = set()
 
@@ -103,24 +80,18 @@ def get_channel_posts(channel):
         if not post_id or post_id in found:
             continue
 
-        message = block.select_one(
-            ".tgme_widget_message_text"
-        )
-
+        message = block.select_one(".tgme_widget_message_text")
         if not message:
             continue
 
         text = message.get_text("\n", strip=True)
-
         text = re.sub(r"[ \t]+", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        text = text.strip()
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
         if not text:
             continue
 
         found.add(post_id)
-
         posts.append({
             "id": post_id,
             "text": text,
@@ -128,6 +99,7 @@ def get_channel_posts(channel):
         })
 
     return posts
+
 
 def matches(text):
     text = text.lower()
@@ -177,10 +149,10 @@ def matches(text):
         "гонорар"
     ]
 
-    return any(word in text for word in hiring_words) and any(
-        word in text for word in payment_words
+    return (
+        any(word in text for word in hiring_words)
+        and any(word in text for word in payment_words)
     )
-
 
 
 def check_commands():
@@ -192,9 +164,7 @@ def check_commands():
         except Exception:
             offset = 0
 
-    telegram("deleteWebhook", {
-        "drop_pending_updates": "false"
-    })
+    telegram("deleteWebhook", {"drop_pending_updates": "false"})
 
     updates = telegram("getUpdates", {
         "offset": offset,
@@ -204,7 +174,6 @@ def check_commands():
 
     for update in updates:
         offset = max(offset, update["update_id"] + 1)
-
         message = update.get("message")
 
         if not message:
@@ -220,10 +189,8 @@ def check_commands():
                 "/id — узнать ID чата\n"
                 "/status — проверить работу"
             )
-
         elif command.startswith("/id"):
             send(chat_id, f"Твой Chat ID: {chat_id}")
-
         elif command.startswith("/status"):
             send(
                 chat_id,
@@ -233,7 +200,7 @@ def check_commands():
 
     OFFSET_FILE.write_text(str(offset))
 
-MAX_ALERTS_PER_RUN = 3
+
 def main():
     print("🚀 Freelance Radar запущен")
 
@@ -245,49 +212,49 @@ def main():
 
     seen = load_seen()
     new_seen = set(seen)
-sent_count = 0
-pending_posts = []
+    pending_posts = []
+
     for channel in CHANNELS:
         print(f"Проверка @{channel}")
 
         try:
             posts = get_channel_posts(channel)
-
             print(f"Найдено публикаций: {len(posts)}")
 
             for post in posts:
-    post_id = post["id"]
+                post_id = post["id"]
 
-    if post_id in seen:
-        continue
+                if post_id in seen:
+                    continue
 
-    if matches(post["text"]):
-        pending_posts.append((channel, post))
-    else:
-        new_seen.add(post_id)
+                if matches(post["text"]):
+                    pending_posts.append((channel, post))
+                else:
+                    new_seen.add(post_id)
 
         except Exception as error:
             print(f"Ошибка @{channel}: {error}")
-for channel, post in pending_posts[:MAX_ALERTS_PER_RUN]:
-    notification = (
-        "🚀 НОВЫЙ ЗАКАЗ\n"
-        "━━━━━━━━━━━━━━\n\n"
-        f"📢 Канал: @{channel}\n\n"
-        "📝 Описание:\n"
-        f"{post['text']}\n\n"
-        "━━━━━━━━━━━━━━\n"
-        f"🔗 Открыть оригинал:\n{post['link']}"
-    )
 
-    send(CHAT_ID, notification)
-    new_seen.add(post["id"])
-    sent_count += 1
+    sent_count = 0
 
-    print(f"Отправлен заказ из @{channel}")
+    for channel, post in pending_posts[:MAX_ALERTS_PER_RUN]:
+        notification = (
+            "🚀 НОВЫЙ ЗАКАЗ\n"
+            "━━━━━━━━━━━━━━\n\n"
+            f"📢 Канал: @{channel}\n\n"
+            "📝 Описание:\n"
+            f"{post['text']}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            f"🔗 Открыть оригинал:\n{post['link']}"
+        )
 
-print(f"Отправлено заказов: {sent_count}")
+        send(CHAT_ID, notification)
+        new_seen.add(post["id"])
+        sent_count += 1
+        print(f"Отправлен заказ из @{channel}")
+
+    print(f"Отправлено заказов: {sent_count}")
     save_seen(new_seen)
-
     print("✅ Проверка завершена")
 
 
