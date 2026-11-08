@@ -1,11 +1,10 @@
 import os
 import json
 import re
-import html
 import urllib.request
 import urllib.parse
 from pathlib import Path
-from html.parser import HTMLParser
+from bs4 import BeautifulSoup
 
 TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.getenv("CHAT_ID", "").strip()
@@ -28,32 +27,26 @@ KEYWORDS = [
     "ищу специалиста",
     "требуется специалист",
     "ищу дизайнера",
-    "ищу копирайтера",
-    "ищу монтажера",
-    "ищу разработчика",
     "нужен дизайнер",
-    "нужен копирайтер",
-    "нужен монтажер",
-    "нужен разработчик",
-    "заказ",
-    "вакансия",
-    "фриланс",
-    "удаленная работа",
-    "удалённая работа",
-    "подработка",
-    "оплата",
+    "ищу копирайтера",
+    "ищу разработчика",
+    "ищу монтажера",
+    "ищу монтажёра",
     "ищу человека",
-    "требуется"
+    "ищем специалиста",
+    "нужен человек",
+    "ищу фрилансера",
+    "заказ на",
+    "оплата за",
+    "подработка",
+    "фриланс"
 ]
 
 
 def telegram(method, params=None):
     data = urllib.parse.urlencode(params or {}).encode()
 
-    request = urllib.request.Request(
-        API + method,
-        data=data
-    )
+    request = urllib.request.Request(API + method, data=data)
 
     with urllib.request.urlopen(request, timeout=30) as response:
         result = json.loads(response.read().decode())
@@ -72,70 +65,20 @@ def send(chat_id, message):
     })
 
 
-class TelegramParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.posts = []
-        self.post_id = None
-        self.post_depth = 0
-        self.text_depth = 0
-        self.text_parts = []
+def load_seen():
+    if SEEN_FILE.exists():
+        try:
+            return set(json.loads(SEEN_FILE.read_text()))
+        except Exception:
+            return set()
 
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
+    return set()
 
-        if self.post_depth == 0:
-            data_post = attrs.get("data-post")
 
-            if tag == "div" and data_post:
-                self.post_id = data_post
-                self.post_depth = 1
-                self.text_depth = 0
-                self.text_parts = []
-                return
-
-        else:
-            self.post_depth += 1
-
-            classes = attrs.get("class", "")
-
-            if "tgme_widget_message_text" in classes:
-                self.text_depth = 1
-            elif self.text_depth > 0:
-                self.text_depth += 1
-
-            if tag == "br" and self.text_depth > 0:
-                self.text_parts.append("\n")
-
-    def handle_endtag(self, tag):
-        if self.post_depth == 0:
-            return
-
-        if self.text_depth > 0:
-            self.text_depth -= 1
-
-        self.post_depth -= 1
-
-        if self.post_depth == 0:
-            text = " ".join(
-                part.strip()
-                for part in self.text_parts
-                if part.strip()
-            )
-
-            if self.post_id and text:
-                self.posts.append({
-                    "id": self.post_id,
-                    "text": text
-                })
-
-            self.post_id = None
-            self.text_parts = []
-            self.text_depth = 0
-
-    def handle_data(self, data):
-        if self.text_depth > 0:
-            self.text_parts.append(data)
+def save_seen(seen):
+    SEEN_FILE.write_text(
+        json.dumps(sorted(seen)[-5000:], ensure_ascii=False)
+    )
 
 
 def get_channel_posts(channel):
@@ -143,42 +86,56 @@ def get_channel_posts(channel):
 
     request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers={"User-Agent": "Mozilla/5.0"}
     )
 
     with urllib.request.urlopen(request, timeout=25) as response:
         page = response.read().decode("utf-8", errors="ignore")
 
-    parser = TelegramParser()
-    parser.feed(page)
+    soup = BeautifulSoup(page, "html.parser")
 
-    return parser.posts
+    posts = []
+    found = set()
 
+    for block in soup.find_all(attrs={"data-post": True}):
+        post_id = block.get("data-post")
 
-def load_seen():
-    if SEEN_FILE.exists():
-        try:
-            return set(json.loads(SEEN_FILE.read_text()))
-        except Exception:
-            pass
+        if not post_id or post_id in found:
+            continue
 
-    return set()
+        message = block.select_one(
+            ".tgme_widget_message_text"
+        )
 
+        if not message:
+            continue
 
-def save_seen(seen):
-    SEEN_FILE.write_text(
-        json.dumps(list(seen)[-5000:], ensure_ascii=False)
-    )
+        text = message.get_text("\n", strip=True)
+
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = text.strip()
+
+        if not text:
+            continue
+
+        found.add(post_id)
+
+        posts.append({
+            "id": post_id,
+            "text": text,
+            "link": f"https://t.me/{post_id}"
+        })
+
+    return posts
 
 
 def matches(text):
     text = text.lower()
 
     return any(
-        word in text
-        for word in KEYWORDS
+        keyword in text
+        for keyword in KEYWORDS
     )
 
 
@@ -209,10 +166,10 @@ def check_commands():
         if not message:
             continue
 
-        text = message.get("text", "").strip()
+        command = message.get("text", "").strip()
         chat_id = message["chat"]["id"]
 
-        if text.startswith("/start"):
+        if command.startswith("/start"):
             send(
                 chat_id,
                 "🔎 Freelance Radar запущен!\n\n"
@@ -220,10 +177,10 @@ def check_commands():
                 "/status — проверить работу"
             )
 
-        elif text.startswith("/id"):
+        elif command.startswith("/id"):
             send(chat_id, f"Твой Chat ID: {chat_id}")
 
-        elif text.startswith("/status"):
+        elif command.startswith("/status"):
             send(
                 chat_id,
                 "🟢 Freelance Radar работает.\n"
@@ -234,19 +191,19 @@ def check_commands():
 
 
 def main():
-    print("🚀 Запуск Freelance Radar")
+    print("🚀 Freelance Radar запущен")
 
     check_commands()
 
     if not CHAT_ID:
-        print("ОШИБКА: не указан CHAT_ID")
+        print("ОШИБКА: CHAT_ID не указан")
         return
 
     seen = load_seen()
     new_seen = set(seen)
 
     for channel in CHANNELS:
-        print(f"Проверяю канал: {channel}")
+        print(f"Проверка @{channel}")
 
         try:
             posts = get_channel_posts(channel)
@@ -261,23 +218,25 @@ def main():
 
                 new_seen.add(post_id)
 
-                text = post["text"]
+                if not matches(post["text"]):
+                    continue
 
-                if matches(text):
-                    link = f"https://t.me/{post_id}"
+                notification = (
+                    "🚀 НОВЫЙ ЗАКАЗ\n"
+                    "━━━━━━━━━━━━━━\n\n"
+                    f"📢 Канал: @{channel}\n\n"
+                    "📝 Описание:\n"
+                    f"{post['text']}\n\n"
+                    "━━━━━━━━━━━━━━\n"
+                    f"🔗 Открыть оригинал:\n{post['link']}"
+                )
 
-                    notification = (
-                        "🚀 НОВАЯ ЗАЯВКА!\n\n"
-                        f"Канал: @{channel}\n\n"
-                        f"{text[:3000]}\n\n"
-                        f"Ссылка: {link}"
-                    )
+                send(CHAT_ID, notification)
 
-                    send(CHAT_ID, notification)
-                    print("Отправлена подходящая публикация")
+                print(f"Отправлен заказ из @{channel}")
 
         except Exception as error:
-            print(f"Ошибка канала @{channel}: {error}")
+            print(f"Ошибка @{channel}: {error}")
 
     save_seen(new_seen)
 
