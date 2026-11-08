@@ -129,14 +129,58 @@ def get_channel_posts(channel):
 
     return posts
 
-
 def matches(text):
     text = text.lower()
 
-    return any(
-        keyword in text
-        for keyword in KEYWORDS
+    exclude = [
+        "подписывайтесь",
+        "розыгрыш",
+        "вебинар",
+        "обучение",
+        "курс",
+        "бесплатный марафон",
+        "ищу работу",
+        "ищу вакансию"
+    ]
+
+    if any(word in text for word in exclude):
+        return False
+
+    hiring_words = [
+        "ищу исполнителя",
+        "нужен исполнитель",
+        "ищу специалиста",
+        "требуется специалист",
+        "ищу дизайнера",
+        "нужен дизайнер",
+        "ищу копирайтера",
+        "ищу разработчика",
+        "ищу монтажера",
+        "ищу монтажёра",
+        "ищу фрилансера",
+        "ищем специалиста",
+        "нужен человек",
+        "ищу человека",
+        "заказ на",
+        "нужен подрядчик",
+        "требуется дизайнер",
+        "требуется разработчик"
+    ]
+
+    payment_words = [
+        "₽",
+        "руб",
+        "оплата",
+        "бюджет",
+        "стоимость",
+        "платно",
+        "гонорар"
+    ]
+
+    return any(word in text for word in hiring_words) and any(
+        word in text for word in payment_words
     )
+
 
 
 def check_commands():
