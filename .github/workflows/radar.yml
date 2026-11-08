@@ -1,0 +1,44 @@
+
+name: Freelance Radar
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore offset
+        uses: actions/cache/restore@v4
+        with:
+          path: offset.txt
+          key: radar-offset-${{ github.run_id }}
+          restore-keys: |
+            radar-offset-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run parser
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
+
+      - name: Save offset
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: offset.txt
+          key: radar-offset-${{ github.run_id }}
